@@ -33,7 +33,7 @@ class UV_Aggregator(nn.Module):
             num_histroy_item = len(history)
             tmp_label = history_r[i]
 
-            if self.uv == True:
+            if self.uv == False:
                 # user component
                 e_uv = self.v2e.weight[history]
                 uv_rep = self.u2e.weight[nodes[i]]

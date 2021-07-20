@@ -135,12 +135,31 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     embed_dim = args.embed_dim
-    dir_data = './data/toy_dataset'
+    dir_data = './data/dataset'
 
     path_data = dir_data + ".pickle"
-    data_file = open(path_data, 'rb')
-    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, test_u, test_v, test_r, social_adj_lists, ratings_list = pickle.load(
-        data_file)
+    with open(path_data, 'rb') as data_file:
+        history_u_lists = pickle.load(data_file)
+        history_ur_lists = pickle.load(data_file)
+        history_v_lists = pickle.load(data_file)
+        history_vr_lists = pickle.load(data_file)
+        train_u = pickle.load(data_file)
+        train_v = pickle.load(data_file)
+        train_r = pickle.load(data_file)
+        test_u = pickle.load(data_file)
+        test_v = pickle.load(data_file)
+        test_r = pickle.load(data_file)
+        social_adj_lists = pickle.load(data_file)
+        ratings_list = pickle.load(data_file)
+        users = pickle.load(data_file)
+        friends = pickle.load(data_file)
+        trust = pickle.load(data_file)
+        usersL = list(set(users))
+        num_users = max(max(usersL), max(train_u), max(test_u))
+        num_items = max(max(list(train_v)), max(list(test_v)))
+        num_ratings = ratings_list.__len__()
+    
+    
     """
     ## toy dataset 
     history_u_lists, history_ur_lists:  user's purchased history (item set in training set), and his/her rating score (dict)
@@ -161,29 +180,28 @@ def main():
                                              torch.FloatTensor(test_r))
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True)
-    num_users = history_u_lists.__len__()
-    num_items = history_v_lists.__len__()
-    num_ratings = ratings_list.__len__()
+
 
     u2e = nn.Embedding(num_users, embed_dim).to(device)
     v2e = nn.Embedding(num_items, embed_dim).to(device)
-    r2e = nn.Embedding(num_ratings, embed_dim).to(device)
+    r2e = nn.Embedding(num_ratings, embed_dim, ).to(device)
 
     # user feature
     # features: item * rating
-    agg_u_history = UV_Aggregator(v2e, r2e, u2e, embed_dim, cuda=device, uv=True)
-    enc_u_history = UV_Encoder(u2e, embed_dim, history_u_lists, history_ur_lists, agg_u_history, cuda=device, uv=True)
-    # neighobrs
-    agg_u_social = Social_Aggregator(lambda nodes: enc_u_history(nodes).t(), u2e, embed_dim, cuda=device)
-    enc_u = Social_Encoder(lambda nodes: enc_u_history(nodes).t(), embed_dim, social_adj_lists, agg_u_social,
-                           base_model=enc_u_history, cuda=device)
+    agg_u_history = UV_Aggregator(v2e, r2e, u2e, embed_dim, cuda=device, uv=False)
+    enc_u_history = UV_Encoder(u2e, embed_dim, history_u_lists, history_ur_lists, agg_u_history, cuda=device, uv=False)
 
     # item feature: user * rating
-    agg_v_history = UV_Aggregator(v2e, r2e, u2e, embed_dim, cuda=device, uv=False)
-    enc_v_history = UV_Encoder(v2e, embed_dim, history_v_lists, history_vr_lists, agg_v_history, cuda=device, uv=False)
+    agg_v_history = UV_Aggregator(v2e, r2e, u2e, embed_dim, cuda=device, uv=True)
+    enc_v_history = UV_Encoder(v2e, embed_dim, history_v_lists, history_vr_lists, agg_v_history, cuda=device, uv=True)
+
+    # channel graph
+    agg_v_channel = Social_Aggregator(lambda nodes: enc_v_history(nodes).t(), v2e, embed_dim, cuda=device)
+    enc_v = Social_Encoder(lambda nodes: enc_v_history(nodes).t(), embed_dim, social_adj_lists, agg_v_channel,
+                           base_model=enc_v_history, cuda=device)
 
     # model
-    graphrec = GraphRec(enc_u, enc_v_history, r2e).to(device)
+    graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
     optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=args.lr, alpha=0.9)
 
     best_rmse = 9999.0
