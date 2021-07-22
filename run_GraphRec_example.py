@@ -1,12 +1,7 @@
 import torch
 import torch.nn as nn
-from torch.nn import init
-from torch.autograd import Variable
 import pickle
 import numpy as np
-import time
-import random
-from collections import defaultdict
 from UV_Encoders import UV_Encoder
 from UV_Aggregators import UV_Aggregator
 from Social_Encoders import Social_Encoder
@@ -15,8 +10,9 @@ import torch.nn.functional as F
 import torch.utils.data
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import log_loss
+import pandas as pd
 from math import sqrt
-import datetime
 import argparse
 import os
 
@@ -113,9 +109,10 @@ def test(model, device, test_loader):
             target.append(list(tmp_target.data.cpu().numpy()))
     tmp_pred = np.array(sum(tmp_pred, []))
     target = np.array(sum(target, []))
-    expected_rmse = sqrt(mean_squared_error(tmp_pred, target))
-    mae = mean_absolute_error(tmp_pred, target)
-    return expected_rmse, mae
+    expected_rmse = sqrt(mean_squared_error(target, tmp_pred))
+    mae = mean_absolute_error(target, tmp_pred)
+    lgloss = log_loss(target, tmp_pred)
+    return expected_rmse, mae, lgloss
 
 
 def main():
@@ -126,6 +123,7 @@ def main():
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate')
     parser.add_argument('--test_batch_size', type=int, default=1000, metavar='N', help='input batch size for testing')
     parser.add_argument('--epochs', type=int, default=100, metavar='N', help='number of epochs to train')
+    parser.add_argument('--no-social', action='store_true', default=False)
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -195,36 +193,46 @@ def main():
     agg_v_history = UV_Aggregator(v2e, r2e, u2e, embed_dim, cuda=device, uv=True)
     enc_v_history = UV_Encoder(v2e, embed_dim, history_v_lists, history_vr_lists, agg_v_history, cuda=device, uv=True)
 
-    # channel graph
-    agg_v_channel = Social_Aggregator(lambda nodes: enc_v_history(nodes).t(), v2e, embed_dim, cuda=device)
-    enc_v = Social_Encoder(lambda nodes: enc_v_history(nodes).t(), embed_dim, social_adj_lists, agg_v_channel,
-                           base_model=enc_v_history, cuda=device)
+    if args.no_social:
+        graphrec = GraphRec(enc_u_history, enc_v_history, r2e).to(device)
+        optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=args.lr, alpha=0.9)
+    else:
+        # channel graph
+        agg_v_channel = Social_Aggregator(lambda nodes: enc_v_history(nodes).t(), v2e, embed_dim, cuda=device)
+        enc_v = Social_Encoder(lambda nodes: enc_v_history(nodes).t(), embed_dim, social_adj_lists, agg_v_channel,
+                            base_model=enc_v_history, cuda=device)
 
-    # model
-    graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
-    optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=args.lr, alpha=0.9)
+        # model
+        graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
+        optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=args.lr, alpha=0.9)
 
     best_rmse = 9999.0
     best_mae = 9999.0
-    endure_count = 0
+    best_lgloss = 9999.0
+
+    logs = []
 
     for epoch in range(1, args.epochs + 1):
 
         train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
-        expected_rmse, mae = test(graphrec, device, test_loader)
+        expected_rmse, mae, lgloss = test(graphrec, device, test_loader)
         # please add the validation set to tune the hyper-parameters based on your datasets.
 
         # early stopping (no validation set in toy dataset)
         if best_rmse > expected_rmse:
             best_rmse = expected_rmse
             best_mae = mae
-            endure_count = 0
-        else:
-            endure_count += 1
-        print("rmse: %.4f, mae:%.4f " % (expected_rmse, mae))
 
-        if endure_count > 5:
-            break
+        if best_lgloss > lgloss:
+            best_lgloss = lgloss
+
+        print("rmse:%.4f, mae:%.4f, lgloss:%.4f " % (expected_rmse, mae, lgloss))
+        logs.append(dict(epoch=epoch, rmse=expected_rmse, mae=mae, lgloss=lgloss))
+    
+    if args.no_social:
+        pd.DataFrame(logs).to_csv('logs/no-social.csv', index=False)
+    else:
+        pd.DataFrame(logs).to_csv('logs/social.csv', index=False)
 
 
 if __name__ == "__main__":
