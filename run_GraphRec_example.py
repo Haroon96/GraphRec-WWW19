@@ -135,7 +135,7 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     embed_dim = args.embed_dim
-    dir_data = './data/dataset'
+    dir_data = './data/youtube-dataset'
 
     path_data = dir_data + ".pickle"
     with open(path_data, 'rb') as data_file:
@@ -151,12 +151,12 @@ def main():
         test_r = pickle.load(data_file)
         social_adj_lists = pickle.load(data_file)
         ratings_list = pickle.load(data_file)
-        users = pickle.load(data_file)
-        friends = pickle.load(data_file)
-        trust = pickle.load(data_file)
-        usersL = list(set(users))
-        num_users = max(max(usersL), max(train_u), max(test_u))
-        num_items = max(max(list(train_v)), max(list(test_v)))
+        num_users = pickle.load(data_file)
+        num_items = pickle.load(data_file)
+        # trust = pickle.load(data_file)
+        # usersL = list(set(users))
+        # num_users = max(max(usersL), max(train_u), max(test_u))
+        # num_items = max(max(list(train_v)), max(list(test_v)))
         num_ratings = ratings_list.__len__()
     
     
